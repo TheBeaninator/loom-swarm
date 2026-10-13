@@ -13,9 +13,8 @@
 //!   loom-swarm seed     --want m.json=out[@r/n] [--want ...] --from origin [--from peer ...]
 //!                       --listen addr:port [--ready <file>]   (serve while pulling, stay up)
 
-mod gguf;
-mod manifest;
-mod net;
+use loom_swarm::manifest;
+use loom_swarm::net;
 
 use anyhow::{bail, Context, Result};
 use manifest::Manifest;

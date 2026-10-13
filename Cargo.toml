@@ -3,7 +3,7 @@ name = "loom-swarm"
 version = "0.1.0"
 edition = "2021"
 description = "Content-addressed model distribution: BLAKE3 piece manifests, peer-to-peer pulls, GGUF tensor extents and per-rank shard layouts for diskless GPU nodes"
-license = "LICENSE-TBD"
+license = "MIT"
 repository = "https://github.com/TheBeaninator/loom-swarm"
 readme = "README.md"
 keywords = ["gguf", "blake3", "p2p", "model-distribution", "tensor-parallel"]
@@ -19,3 +19,11 @@ blake3     = "1"
 [profile.release]
 lto = true
 codegen-units = 1
+
+[lib]
+name = "loom_swarm"
+path = "src/lib.rs"
+
+[[bin]]
+name = "loom-swarm"
+path = "src/main.rs"

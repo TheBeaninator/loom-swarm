@@ -50,3 +50,8 @@ move the same pieces.
 
 Extracted from the Loom workspace (crate `loom-swarm`, 2026-10) where it has been loading tensor-parallel shards on a
 production pod since 2026-10-03. Rust 2021, dependencies: anyhow, serde, serde_json, hex, blake3.
+
+## License
+
+MIT. The crate is also a library: `manifest`, `gguf` and `net` are public modules. See docs/ENGINES.md for what an
+inference engine provides to use each tier.
