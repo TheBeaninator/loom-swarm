@@ -1,2 +1,3 @@
 target/
 *.swarm.json
+dist/
