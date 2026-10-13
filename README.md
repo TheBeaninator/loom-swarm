@@ -21,6 +21,12 @@ to the origin), 2026-10-07, loading a 4-way tensor-parallel model from two peers
 | Pull time, origin plus peers over the RoCE rail | 9.3 s (3.95 GiB/s) |
 | Engine load from the seeded copy, all four ranks | 5.2 to 6.0 s |
 | Same load straight over NFS | 274.5 s |
+| Pieces verified against the manifest | every one; 113,337 tensor hashes compared against the NFS-loaded copy, 0 mismatches |
+| Where the bytes came from (one rank) | 29.8 GiB from its TP partner over the rail, 17.3 and 15.5 GiB from the two cache peers, about 1 GiB each over the LAN, 0 from the origin |
+
+The origin served nothing in that run: once two nodes held copies, the whole load came from peers, and the fastest
+link took the most work without any configuration beyond listing addresses in preference order. A full 4-rank
+tensor-parallel model went from cold to serving in about 15 s, where NFS had taken four and a half minutes.
 
 Without the rail (2.5 GbE only, 2026-10-03): two tensor-parallel pairs cold-loaded an 81 GiB model in 356 s from origin
 plus peers, against 790 s for one pair over NFS; a restart with the seeded copy kept took 15 s.
