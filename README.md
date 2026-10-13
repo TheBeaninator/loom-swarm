@@ -12,9 +12,18 @@ Two layers, deliberately separate:
   priority list. For engines that are not GGUF, `shards` records explicit per-rank byte ranges, and `manifest --layout`
   turns one rank's recorded read log into a per-rank layout artifact that is exactly that rank's bytes.
 
-Measured on a 4-node Strix Halo pod (diskless workers, 124 GB RAM each, one 2.5 GbE link to the origin): two
-tensor-parallel pairs cold-loading an 81 GiB model took 356 s from origin plus peers against 790 s for one pair over
-NFS; a restart with the RAM disk kept took 15 s. A TP4 rank pulling its layout artifact fetched 36.7 GiB instead of 67.6.
+Measured on a 4-node Strix Halo pod (diskless workers, 124 GB RAM each, 100 GbE RoCE between workers, one 2.5 GbE link
+to the origin), 2026-10-07, loading a 4-way tensor-parallel model from two peers that held a copy on local cache disks:
+
+| | per rank |
+|---|---|
+| Bytes pulled with a per-rank layout artifact | 36.71 GiB (67.6 GiB with whole-file pieces) |
+| Pull time, origin plus peers over the RoCE rail | 9.3 s (3.95 GiB/s) |
+| Engine load from the seeded copy, all four ranks | 5.2 to 6.0 s |
+| Same load straight over NFS | 274.5 s |
+
+Without the rail (2.5 GbE only, 2026-10-03): two tensor-parallel pairs cold-loaded an 81 GiB model in 356 s from origin
+plus peers, against 790 s for one pair over NFS; a restart with the seeded copy kept took 15 s.
 
 ## Verbs
 
