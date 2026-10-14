@@ -7,10 +7,11 @@ Two layers, deliberately separate:
 - **Wire.** A file is cut into fixed-size pieces (16 MiB by default) and each piece gets a BLAKE3 hash; the manifest
   (`<file>.swarm.json`) is the artifact's identity. Any transport that moves pieces and verifies them against the
   manifest works: this crate's own HTTP range puller, a torrent client, or an RDMA path later. It works on any file.
-- **Semantic.** When the artifact parses as GGUF, a tensor-extent sidecar maps tensor name to byte range to piece
-  indices. Expert-shard paging and partial layer pulls consume it: a tensor-parallel shard map is just a piece
-  priority list. For engines that are not GGUF, `shards` records explicit per-rank byte ranges, and `manifest --layout`
-  turns one rank's recorded read log into a per-rank layout artifact that is exactly that rank's bytes.
+- **Semantic.** When the artifact parses as GGUF or safetensors (each behind a default-on Cargo feature), a
+  tensor-extent sidecar maps tensor name to byte range to piece indices. Expert-shard paging and partial layer pulls
+  consume it: a tensor-parallel shard map is just a piece priority list. For any other format, `shards` records
+  explicit per-rank byte ranges, and `manifest --layout` turns one rank's recorded read log into a per-rank layout
+  artifact that is exactly that rank's bytes.
 
 Measured on a 4-node Strix Halo pod (diskless workers, 124 GB RAM each, 100 GbE RoCE between workers, one 2.5 GbE link
 to the origin), 2026-10-07, loading a 4-way tensor-parallel model from two peers that held a copy on local cache disks:
@@ -64,7 +65,9 @@ move the same pieces.
 ## Status
 
 Extracted from the Loom workspace (crate `loom-swarm`, 2026-10) where it has been loading tensor-parallel shards on a
-production pod since 2026-10-03. Rust 2021, dependencies: anyhow, serde, serde_json, hex, blake3.
+production pod since 2026-10-03. Development continues there; `tools/sync-from-loom.sh` brings `src/` across one way
+and records the Loom commit in `.loom-sync`. Rust 2021, dependencies: anyhow, serde, serde_json, hex, blake3.
+Features: `gguf`, `safetensors` (both default); `--no-default-features` leaves the wire layer only.
 
 ## License
 

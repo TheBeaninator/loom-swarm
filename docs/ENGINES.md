@@ -36,16 +36,25 @@ read logger, or the engine's own loader instrumentation).
 If the file format can be read into a list of `(tensor name, offset, length)`, loom-swarm maps tensors onto pieces and
 pulls can be expressed by name: `--match _exps --shard 1/4` pulls the expert tensors that belong to rank 1 of 4.
 
-GGUF has this built in (`src/gguf.rs`, 175 lines: a header reader whose extents are offset deltas, so alignment padding
-is included and the padded range is what you must read). A second format needs the same shape of reader:
+Two formats are built in, each behind a Cargo feature that is on by default:
+
+- **GGUF** (`src/gguf.rs`): a header reader whose extents are offset deltas, so alignment padding is included and the
+  padded range is what you must read.
+- **safetensors** (`src/safetensors.rs`, ~90 lines without tests): the u64 header length, the JSON header, and
+  `data_offsets` per tensor, which are relative to the data section at `8 + header length`. Extents are byte-exact.
+  Multi-file checkpoints are one artifact per file.
+
+A third format needs the same shape of reader plus one line in `manifest::detect_format`:
 
 ```rust
-pub struct TensorExtent { pub name: String, pub offset: u64, pub size: u64 }
-pub fn parse(path: &Path) -> anyhow::Result<Option<Vec<TensorExtent>>>   // None when the file is not this format
+use loom_swarm::manifest::TensorExtent;            // { name: String, offset: u64, size: u64 }, absolute offsets
+pub fn parse(path: &Path) -> anyhow::Result<Option<MyInfo>>   // None when the file is not this format; the
+                                                              // info carries data_offset and Vec<TensorExtent>
 ```
 
-Formats are feature-gated; `gguf` is on by default. safetensors is the obvious next one (its header is JSON with
-`data_offsets` per tensor).
+`detect_format` tries the enabled readers in order and the first match supplies the manifest's sidecar (`gguf` or
+`safetensors` block plus the `tensors` list). `Manifest::data_offset()` is what `--shard` uses to keep every rank on
+the header pieces, whichever format produced them.
 
 What you get: pulls by tensor pattern, the expert-shard rule (`_exps` tensors split by rank), and the basis for paging
 experts in and out by name.
@@ -75,7 +84,7 @@ Engine obligation: Rust, or a C ABI shim (not provided yet; the surface is small
 | Fast interconnect first, LAN second | 0 | list `--from` addresses in that order |
 | Local cache disk instead of tmpfs | 0 | operator: point the output path at the cache |
 | Per-rank virtual layout (no overfetch) | 1 | `manifest --layout` |
-| Expert-shard split by rank | 2 | `extents --shard r/n`, `pull --shard r/n` |
+| Expert-shard split by rank (GGUF or safetensors) | 2 | `extents --shard r/n`, `pull --shard r/n` |
 | Piece priority by layer order | 3 | library caller |
 
 ## What loom-swarm will not do
