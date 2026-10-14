@@ -5,7 +5,7 @@
 //!   loom-swarm manifest <file> [--piece-mib N] [--threads N] [--layout ranges] [-o out.json]
 //!   loom-swarm verify   <file> --manifest m.json [--threads N]
 //!   loom-swarm extents  --manifest m.json --match <substring> [--match ...] | --shard r/n
-//!   loom-swarm shards   --manifest m.json --add r/n=<ranges file> [--add ...]   (explicit TP shards, non-GGUF)
+//!   loom-swarm shards   --manifest m.json --add r/n=<ranges file> [--add ...]   (explicit TP shards, formats without a sidecar)
 //!   loom-swarm chunk    <file> --manifest m.json --store <dir>
 //!   loom-swarm rehydrate --manifest m.json --store <dir> -o <file>
 //!   loom-swarm serve    --listen addr:port --manifest m.json [--manifest ...]
@@ -57,7 +57,7 @@ fn print_usage() {
   verify   <file> --manifest m.json [--threads N]
   extents  --manifest m.json --match <substring> [--match ...] | --shard r/n [--shard-match s]
   shards   --manifest m.json --add r/n=<file of \"offset length\" lines> [--add ...]
-           record a rank's byte ranges (e.g. an engine's read log) so --shard / @r/n work on non-GGUF files
+           record a rank's byte ranges (e.g. an engine's read log) so --shard / @r/n work on files without a tensor sidecar
   chunk    <file> --manifest m.json --store <dir>
   rehydrate --manifest m.json --store <dir> -o <file>
   serve    --listen <addr:port> --manifest m.json [--manifest ...] [--file <path>]
@@ -216,7 +216,7 @@ fn cmd_extents(args: &[String]) -> Result<()> {
         bail!("at least one --match <substring> required");
     }
     if m.tensors.is_empty() {
-        bail!("manifest has no tensor sidecar (artifact was not GGUF)");
+        bail!("manifest has no tensor sidecar (artifact was neither GGUF nor safetensors)");
     }
     let mut pieces = Vec::new();
     let mut bytes = 0u64;

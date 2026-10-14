@@ -9,13 +9,7 @@ use anyhow::{bail, Context, Result};
 use std::fs::File;
 use std::io::{BufReader, Read, Seek, SeekFrom};
 
-pub struct TensorExtent {
-    pub name: String,
-    /// Absolute file offset (data section base + relative offset).
-    pub offset: u64,
-    /// Padded extent: distance to the next tensor's offset (file end for the last).
-    pub size: u64,
-}
+pub use crate::manifest::TensorExtent;
 
 pub struct GgufInfo {
     pub version: u32,

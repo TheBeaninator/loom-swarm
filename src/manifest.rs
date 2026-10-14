@@ -1,5 +1,5 @@
-//! The loom-swarm manifest: fixed-size BLAKE3 pieces plus an optional GGUF
-//! tensor-extent sidecar. The manifest is the unit of trust — every transport
+//! The loom-swarm manifest: fixed-size BLAKE3 pieces plus an optional tensor-extent
+//! sidecar (GGUF or safetensors; formats are feature-gated and plug in through `TensorExtent`). The manifest is the unit of trust — every transport
 //! (torrent, HTTP, future RDMA) verifies pieces against it, and the semantic
 //! layer maps tensors onto piece indices for partial pulls.
 
@@ -23,8 +23,10 @@ pub struct Manifest {
     /// blake3 over the concatenated piece hashes — the artifact's swarm identity.
     pub root: String,
     pub pieces: Vec<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gguf: Option<GgufMeta>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub safetensors: Option<SafetensorsMeta>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tensors: Vec<TensorEntry>,
     /// Explicit tensor-parallel shards for formats without a GGUF sidecar (e.g. strixite's .strixw): "r/n" -> the
@@ -60,6 +62,25 @@ pub struct GgufMeta {
     pub model_name: Option<String>,
 }
 
+/// One tensor's byte range, as a format reader reports it. This is the whole contract a format module has to
+/// meet: a `parse(path)` that yields these, or `None` when the file is not that format.
+pub struct TensorExtent {
+    pub name: String,
+    /// Absolute file offset.
+    pub offset: u64,
+    /// Bytes to read to materialize the tensor. GGUF reports padded offset deltas (alignment slack included);
+    /// safetensors reports exact sizes.
+    pub size: u64,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct SafetensorsMeta {
+    pub header_size: u64,
+    pub data_offset: u64,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub metadata: BTreeMap<String, String>,
+}
+
 #[derive(Serialize, Deserialize)]
 pub struct TensorEntry {
     pub name: String,
@@ -71,6 +92,15 @@ pub struct TensorEntry {
 }
 
 impl Manifest {
+    /// Where the data section starts when the artifact has a tensor sidecar: everything before it is header, and
+    /// every tensor-parallel rank holds it.
+    pub fn data_offset(&self) -> Option<u64> {
+        if let Some(g) = &self.gguf {
+            return Some(g.data_offset);
+        }
+        self.safetensors.as_ref().map(|s| s.data_offset)
+    }
+
     pub fn n_pieces(&self) -> u64 {
         self.file_size.div_ceil(self.piece_size)
     }
@@ -203,36 +233,17 @@ pub fn build(path: &Path, piece_size: u64, threads: usize) -> Result<Manifest> {
     let hashes = hash_pieces(path, piece_size, threads)?;
     let root = root_of(&hashes);
 
-    let (gguf, tensors) = match crate::gguf::parse(path)? {
-        Some(info) => {
-            let tensors = info
-                .tensors
-                .iter()
-                .map(|t| TensorEntry {
-                    name: t.name.clone(),
-                    offset: t.offset,
-                    size: t.size,
-                    piece_first: t.offset / piece_size,
-                    piece_last: if t.size == 0 {
-                        t.offset / piece_size
-                    } else {
-                        (t.offset + t.size - 1) / piece_size
-                    },
-                })
-                .collect();
-            (
-                Some(GgufMeta {
-                    version: info.version,
-                    alignment: info.alignment,
-                    data_offset: info.data_offset,
-                    architecture: info.architecture,
-                    model_name: info.model_name,
-                }),
-                tensors,
-            )
-        }
-        None => (None, Vec::new()),
-    };
+    let (gguf, safetensors, extents) = detect_format(path)?;
+    let tensors = extents
+        .iter()
+        .map(|t| TensorEntry {
+            name: t.name.clone(),
+            offset: t.offset,
+            size: t.size,
+            piece_first: t.offset / piece_size,
+            piece_last: if t.size == 0 { t.offset / piece_size } else { (t.offset + t.size - 1) / piece_size },
+        })
+        .collect();
 
     Ok(Manifest {
         format: FORMAT.to_string(),
@@ -245,12 +256,35 @@ pub fn build(path: &Path, piece_size: u64, threads: usize) -> Result<Manifest> {
         root,
         pieces: hashes.iter().map(hex::encode).collect(),
         gguf,
+        safetensors,
         tensors,
         shards: BTreeMap::new(),
         layout: Vec::new(),
         disk_size: 0,
         prefix: OnceLock::new(),
     })
+}
+
+/// Try each enabled format reader in turn; the first that recognizes the file supplies the sidecar.
+#[allow(unreachable_code, unused_variables)]
+fn detect_format(path: &Path) -> Result<(Option<GgufMeta>, Option<SafetensorsMeta>, Vec<TensorExtent>)> {
+    #[cfg(feature = "gguf")]
+    if let Some(info) = crate::gguf::parse(path)? {
+        let meta = GgufMeta {
+            version: info.version,
+            alignment: info.alignment,
+            data_offset: info.data_offset,
+            architecture: info.architecture,
+            model_name: info.model_name,
+        };
+        return Ok((Some(meta), None, info.tensors));
+    }
+    #[cfg(feature = "safetensors")]
+    if let Some(info) = crate::safetensors::parse(path)? {
+        let meta = SafetensorsMeta { header_size: info.header_size, data_offset: info.data_offset, metadata: info.metadata };
+        return Ok((None, Some(meta), info.tensors));
+    }
+    Ok((None, None, Vec::new()))
 }
 
 /// A virtual artifact over `ranges` of `path` (coalesced; see `Manifest::layout`), hashed piece by piece.
@@ -271,6 +305,7 @@ pub fn build_layout(path: &Path, ranges: Vec<[u64; 2]>, piece_size: u64, threads
         root: String::new(),
         pieces: Vec::new(),
         gguf: None,
+        safetensors: None,
         tensors: Vec::new(),
         shards: BTreeMap::new(),
         layout,
@@ -358,7 +393,7 @@ pub const DEFAULT_SHARD_MATCH: &str = "_exps";
 /// widening by this much makes the boundary piece land on both sides.
 const SHARD_SLACK: u64 = 1 << 16;
 
-/// Pieces a tensor-parallel rank `rank` of `n` must hold: the whole GGUF header,
+/// Pieces a tensor-parallel rank `rank` of `n` must hold: the whole file header,
 /// every tensor not matching `pats` in full, and only the rank's contiguous
 /// 1/n byte slice of each matching tensor. Measured against ds4 TP=2 page-cache
 /// residency on DeepSeek-V4-Flash IQ2XXS (2026-10-03): this reproduces what each
@@ -384,11 +419,11 @@ pub fn shard_pieces(m: &Manifest, rank: u64, n: u64, pats: &[&str]) -> Result<Ve
         p.dedup();
         return Ok(p);
     }
-    let Some(g) = &m.gguf else {
-        bail!("--shard needs a GGUF tensor sidecar and this manifest has none");
+    let Some(data_offset) = m.data_offset() else {
+        bail!("--shard needs a tensor sidecar (GGUF or safetensors) and this manifest has none");
     };
     let ps = m.piece_size;
-    let mut p: Vec<u64> = (0..=g.data_offset.saturating_sub(1) / ps).collect();
+    let mut p: Vec<u64> = (0..=data_offset.saturating_sub(1) / ps).collect();
     let mut matched = 0usize;
     for t in &m.tensors {
         if t.size == 0 {
