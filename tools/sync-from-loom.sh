@@ -63,9 +63,9 @@ for sec in dependencies features; do
 done
 
 # 6. build and test as published
-$CARGO build --release 2>&1 | tail -2
-$CARGO test 2>&1 | grep -E "^test result|FAILED|panicked" || true
-$CARGO test 2>&1 | grep -q "^test result: ok" || { echo "tests failed; nothing committed" >&2; exit 1; }
+OUT=$($CARGO build --release 2>&1) || { echo "$OUT" | tail -30; echo "build failed; nothing committed" >&2; exit 1; }
+OUT=$($CARGO test 2>&1) || { echo "$OUT" | grep -E "FAILED|panicked|^error" | head -20; echo "tests failed; nothing committed" >&2; exit 1; }
+echo "$OUT" | grep -E "^test result"
 
 echo "$FULL" > .loom-sync
 git add src .loom-sync
